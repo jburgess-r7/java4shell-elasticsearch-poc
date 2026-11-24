@@ -1,0 +1,54 @@
+// The physical destination includes a guard. Any write beyond the decoder's
+// nominal 98-byte capacity stays inside this real byte array.
+int decode(def decoder, byte[] input, byte[] output) {
+  return decoder.decode(input, output);
+}
+
+byte[] input = new byte[129];
+byte[] whole = new byte[256];
+byte[] padded = new byte[260];
+byte[] warmOutput = new byte[512];
+byte[] destination = new byte[226];
+for (int i = 0; i < 128; ++i) input[i] = (byte)65;
+input[128] = (byte)61;
+for (int i = 0; i < 256; ++i) whole[i] = (byte)65;
+for (int i = 0; i < 258; ++i) padded[i] = (byte)65;
+padded[258] = (byte)61;
+padded[259] = (byte)61;
+
+def decoder = Base64.getDecoder();
+int checksum = 0;
+for (int i = 0; i < 30000; ++i) {
+  checksum ^= decode(decoder, (i & 1) == 0 ? whole : padded, warmOutput);
+}
+
+int exceptionCount = 0;
+for (int attempt = 1; attempt <= 2000; ++attempt) {
+  for (int i = 0; i < destination.length; ++i) destination[i] = (byte)90;
+  try {
+    checksum ^= decode(decoder, input, destination);
+  } catch (IllegalArgumentException expected) {
+    ++exceptionCount;
+  }
+  int first = -1, last = -1, changed = 0;
+  for (int i = 98; i < destination.length; ++i) {
+    if (destination[i] != (byte)90) {
+      if (first == -1) first = i;
+      last = i;
+      ++changed;
+    }
+  }
+  if (first != -1) {
+    return ['stage':'guard-overwrite', 'attempt':attempt,
+      'nominal_capacity':98, 'destination_length':destination.length,
+      'first':first, 'last':last, 'changed':changed,
+      'exceptions':exceptionCount, 'checksum':checksum,
+      'input_base64':Base64.getEncoder().encodeToString(input),
+      'witness_base64':Base64.getEncoder().encodeToString(destination)];
+  }
+}
+return ['stage':'unchanged', 'attempts':2000,
+  'nominal_capacity':98, 'destination_length':destination.length,
+  'exceptions':exceptionCount, 'checksum':checksum,
+  'input_base64':Base64.getEncoder().encodeToString(input),
+  'witness_base64':Base64.getEncoder().encodeToString(destination)];

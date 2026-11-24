@@ -1,0 +1,7 @@
+.validation-local/
+__pycache__/
+*.py[cod]
+*.class
+hs_err_pid*.log
+core
+core.*

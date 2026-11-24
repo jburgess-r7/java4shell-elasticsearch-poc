@@ -1,0 +1,114 @@
+{
+  "command_targets": {
+    "7.17.28": {
+      "archive_sha256": "d72adef80b899eb624f6e14aa3b0d8c2ed6597e5fe328bbb1ed9de2c3c14ef28",
+      "archive_sha512": "fb2cc31cfa862862855ecca6d7c56cbf21eaa42dc3c87f18fa1986a334ec4e6d4fe570e5220bfeffbc0c57d072cd37b7c4cf125dac3e27108d2bfa396ce660aa",
+      "java_majors": [
+        17,
+        21
+      ],
+      "revision": "139cb5a961d8de68b8e02c45cc47f5289a3623af",
+      "url": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.17.28-linux-x86_64.tar.gz"
+    },
+    "7.17.29": {
+      "archive_sha256": "f7175de3ac8ca16326b9dbdff4ef70bc3da6405efe624655444ba2464073ea8e",
+      "archive_sha512": "0b3c84966b0af346233c56e96cb87578c2afe37809ff3c375b771589405de796214542bbb9f2294fb4786e52c4a5d7ac79924fe64bee9e6c76788d700ea81e26",
+      "java_majors": [
+        17,
+        21
+      ],
+      "revision": "580aff1a0064ce4c93293aaab6fcc55e22c10d1c",
+      "url": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.17.29-linux-x86_64.tar.gz"
+    }
+  },
+  "elasticsearch": {
+    "archive_sha256": "f7175de3ac8ca16326b9dbdff4ef70bc3da6405efe624655444ba2464073ea8e",
+    "archive_sha512": "0b3c84966b0af346233c56e96cb87578c2afe37809ff3c375b771589405de796214542bbb9f2294fb4786e52c4a5d7ac79924fe64bee9e6c76788d700ea81e26",
+    "files": {
+      "bin/elasticsearch": "d4c94c888f8f07fa699c9bbc6d24a33cc4d05b00a9310dc0362e1731145cc37d",
+      "bin/elasticsearch-certgen": "930d1a49532eb3c2a0f5a26aed983b5a43245bba3d144cbf69f77fdfe2051281",
+      "bin/elasticsearch-certutil": "c3ff5a4eb5ae6a3c6017a233ab7a63ef4067115bcef09cd45ea334654e509e73",
+      "bin/elasticsearch-cli": "5b12b47922bd4e9e15fd9f9d88a87dbf2c241cee5e8e6081f59d106652a4ff33",
+      "bin/elasticsearch-croneval": "30dade9ddc6f23d7f807912f7e5062b2cce995d03c8c3008fefd288f573ed1c2",
+      "bin/elasticsearch-env": "e24a68298a74e81991b608244b1167da34f544ca5fe1d7bc1756935ab1dc1efa",
+      "bin/elasticsearch-env-from-file": "5afd893e30e0fdaaf176ff4fa9a129aeb5858f37c24df277938c86e160a8b575",
+      "bin/elasticsearch-geoip": "d5adff4084f6a22f7fa7ca92e3ff7a5d51e775213c2033e0f69656fddd22569d",
+      "bin/elasticsearch-keystore": "00ba40331ae20498c4cccdfc862fa9fdac372be4243ae0c3d1fef481527c6a27",
+      "bin/elasticsearch-migrate": "e67b9a6920e00a0dc21892590b87b6a47decbdd196130e73235bfadbfb3f227a",
+      "bin/elasticsearch-node": "120b122c67d262cbb7c290539c896daa778f31222de98df125dcd1eedb95647d",
+      "bin/elasticsearch-plugin": "353397db17a5cfd9a3636bfe551420e24cec420e62387b4a90a9732c6a9eeb46",
+      "bin/elasticsearch-saml-metadata": "10695a4acdc1b5513a5b61f307a77060f26db110efe58f06005f1f5dd1401df8",
+      "bin/elasticsearch-service-tokens": "56480f278c277be9a781c8d5d49d28a4be347b5d247215758df604b34b4299c1",
+      "bin/elasticsearch-setup-passwords": "b55eb771e90295c814129108c534bad5ca7453a1f46052fbb3bcc000f1fa97c4",
+      "bin/elasticsearch-shard": "4e1b4aa409c2c38244d75b46cd0695638aa7afa688585e1ed98e1ab5f9ec1957",
+      "bin/elasticsearch-sql-cli": "9261b3725d4f02921e46bce2c65246b45fccbad16d4d0b87aa438739b861c301",
+      "bin/elasticsearch-sql-cli-7.17.29.jar": "28cd80655ec8f07816162ea15e76368407d26c294b7005802066b609688aed0c",
+      "bin/elasticsearch-syskeygen": "2fdf908747b1e3b22d636ca6b29ac1260d3b6f0c8836d5e41770fb99519a7184",
+      "bin/elasticsearch-users": "e8b94fda6c4e5ba25ea1358b4c805323f3da183c321452ec4fb23ab210184d17",
+      "bin/x-pack-env": "9fc1fa88ba19bd1dfdea81ef229aaf1e3c760e54f196d87a7403895f43f1d665",
+      "bin/x-pack-security-env": "e3d14353f5984a0db9d4973d3f6e67d151b1e7ebfcc8ba67c7e8428189e01b0b",
+      "bin/x-pack-watcher-env": "0f51b95d523a609c77ec6d9a177e6f7afc3948ff80628eb4cd734d518edc7d4a",
+      "config/elasticsearch.yml": "b85539d7f2d29b280f128c924cb3e1dc3867d1798ab7e8c285a2200d3669432e",
+      "config/jvm.options": "01b7e49969c569518815020d781e12736153973874004621657eb15413ae1678"
+    },
+    "jar_inventory_sha256": "7f44fae943ee7bb7cffab4160e39328e5e331631e0d158acd71bf374639b48f3",
+    "revision": "580aff1a0064ce4c93293aaab6fcc55e22c10d1c",
+    "url": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.17.29-linux-x86_64.tar.gz",
+    "version": "7.17.29"
+  },
+  "marker_source_sha256": "8df40a25f428782faa9198c7b9ad11c153faaf292f57a876531135f95c78126c",
+  "runtimes": {
+    "17": {
+      "affected": {
+        "archive_sha256": "8b9b611d917e3dfd8419d3566b5949226f69b052fed7e109c1368add1dfe8711",
+        "java_sha256": "a2195ae9f8a91b82f53df7e1d1b9a650937ebbabbf67d0240c6378b4fbd9990b",
+        "javac_sha256": "1f0ccaede1af2ff0d3cbc6eda708080fa073237bb53a7b2340bbccc378db523f",
+        "jcmd_sha256": "e7aabbb268504dff91aed3abaf3c58edba372bd11f28a5fe5c4fa5264fe76bbb",
+        "libjvm_sha256": "9a00b72837fd20c9450cf113ef6526af174cac87d4746b1713de26f1103d0b68",
+        "modules_sha256": "fcdfc72acc1ec5e8542fc2170c587ef23edbbdeddcbf435f169d270e02469d7c",
+        "name": "Temurin 17.0.21+9",
+        "release_sha256": "9568390645661374febde48f3c7a019f21cb116d6e4c627de29c119aa7bd0efc",
+        "url": "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.21%2B9/OpenJDK17U-jdk_x64_linux_hotspot_17.0.21_9.tar.gz"
+      },
+      "fixed": {
+        "archive_sha256": "d8a350b5988f58e6186ddc1db584af170e9d56862816d4a578e9570d85307e2c",
+        "java_sha256": "6f958ee7c9ba9b17cb33b1d0614b8acb08740041045a621a108dbd5c3035233d",
+        "javac_sha256": "228759e2d896de6a8c0517597cb8ecae01c558aff21b89b1b7b50a781f4ee864",
+        "jcmd_sha256": "8153dd879adcef015eaed4688f5cc468f50f74552c0769f0a8b555c3505a7dec",
+        "libjvm_sha256": "f365196ad744c8e5941f8e502ffcc9c144023cc93d93b4355fb852f403fae2a4",
+        "modules_sha256": "a6a5261d2dbf7ae096d663dae3182256dab1756ec1ba223c7f49ef4055efedee",
+        "name": "Corretto 17.0.21.1.2",
+        "release_sha256": "108e85da2b3ec60eebae6440271ffef249a0535c8700fcf6fd7eb232777a8be7",
+        "url": "https://corretto.aws/downloads/resources/17.0.21.1.2/amazon-corretto-17.0.21.1.2-linux-x64.tar.gz"
+      },
+      "marker_class_sha256": "020347523a611bf5426b4f645cdf6d2fcfe559d181e8b7b65224e93892bae071",
+      "payload_sha256": "fb0e1d2248a1c46c741b4cbc6bdf1cd063b546f9408b2f99e7a66ac5ef6f1fbc"
+    },
+    "21": {
+      "affected": {
+        "archive_sha256": "d7f5d5cf865a2902b70ff549b97586a7d3f234e016f041ab447ea740c7d66d1c",
+        "java_sha256": "9cad3f2620d3ef2ed10b26f922af7e773d54fdaa05f615d6d6df014f3fec4155",
+        "javac_sha256": "2cc288a26beebc50ca7cd924847dffbfb38ef3314e105bba6d4ebce03a0bcb6b",
+        "jcmd_sha256": "a302f66fa12d8dad59d8f6d770edda61be326872c39521e2ed1a3df014d61dbc",
+        "libjvm_sha256": "b1a6a98962406718a491922ea6a3f8d898ea7c4a9ebe814a7963defc61ce62b2",
+        "modules_sha256": "a5fd7c311fbd96adcbd43757dbb94461e14df353b6ae9f5c029c45805a39782c",
+        "name": "Temurin 21.0.13+9",
+        "release_sha256": "f83f6dcc966043c93cd498ac8e7ee7c310852074970d62c702e4ad2710002898",
+        "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_x64_linux_hotspot_21.0.13_9.tar.gz"
+      },
+      "fixed": {
+        "archive_sha256": "2aaa2a9a43143b20ff0b28c8d0da27407b97dc40b160d9a2f60a26965815e948",
+        "java_sha256": "9cc02e6549ee5d567dfa660079b31cec5e77a057f0bb68d8b9e0f4de375d2da8",
+        "javac_sha256": "7557d0c4e098369ae9f4d8844396fdd82c4120a678c82c5610257f588ddc13de",
+        "jcmd_sha256": "d70d02f00c62160ed8f0236c9f6a593cd0bff4fa1d94eb4df6715301a63dca30",
+        "libjvm_sha256": "284d80b0923bb8146052be53ce5afde1189dcef3f3dfffdbe332ccf39a19da95",
+        "modules_sha256": "ff453b49a7c950cd742a94851c52b2df970fcd2e5f527e6d234fb67ea0bd8c5c",
+        "name": "Corretto 21.0.13.1.2",
+        "release_sha256": "892cacf57c86c85a5284944b37b138aa666a7148a6e4d75e6bd6023e747964fc",
+        "url": "https://corretto.aws/downloads/resources/21.0.13.1.2/amazon-corretto-21.0.13.1.2-linux-x64.tar.gz"
+      },
+      "marker_class_sha256": "dd82f4ef6037a9fa993bb10533dd425fef5a3143baade53073272fcfd5004c0b",
+      "payload_sha256": "7b74d0fc2715af7b45264d92512d34cc993ef9bc108c67a1a9cafcb6d42f79c3"
+    }
+  }
+}
